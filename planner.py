@@ -23,7 +23,7 @@ def calculate_bmi(weight, height):
 
 def generate_fitness_plan(age, current_weight, target_weight, height, goal, activity_level, available_time):
     
-    # Weight difference calculation
+    # Weight difference calculate pannudu
     weight_diff = abs(current_weight - target_weight)
     
     if current_weight > target_weight:
@@ -33,7 +33,7 @@ def generate_fitness_plan(age, current_weight, target_weight, height, goal, acti
     else:
         weight_goal = "Maintain current weight"
 
-    # BMI calculation
+    # BMI calculate pannudu
     bmi, bmi_category = calculate_bmi(current_weight, height)
 
     prompt = f"""
