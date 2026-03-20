@@ -6,25 +6,57 @@ load_dotenv()
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-def generate_fitness_plan(age, weight, height, goal, activity_level, available_time):
+def calculate_bmi(weight, height):
+    height_m = height / 100
+    bmi = weight / (height_m ** 2)
     
+    if bmi < 18.5:
+        category = "Underweight"
+    elif bmi < 25:
+        category = "Normal weight"
+    elif bmi < 30:
+        category = "Overweight"
+    else:
+        category = "Obese"
+    
+    return round(bmi, 1), category
+
+def generate_fitness_plan(age, current_weight, target_weight, height, goal, activity_level, available_time):
+    
+    # Weight difference calculation
+    weight_diff = abs(current_weight - target_weight)
+    
+    if current_weight > target_weight:
+        weight_goal = f"Lose {weight_diff} kg"
+    elif current_weight < target_weight:
+        weight_goal = f"Gain {weight_diff} kg"
+    else:
+        weight_goal = "Maintain current weight"
+
+    # BMI calculation
+    bmi, bmi_category = calculate_bmi(current_weight, height)
+
     prompt = f"""
-    Create a detailed personalized fitness plan for:
-    - Age: {age} years
-    - Weight: {weight} kg
+    Create a SHORT fitness plan for:
+    - Age: {age}
+    - Current Weight: {current_weight} kg
+    - Target Weight: {target_weight} kg
+    - Weight Goal: {weight_goal}
     - Height: {height} cm
+    - Current BMI: {bmi} ({bmi_category})
     - Goal: {goal}
-    - Activity Level: {activity_level}
-    - Available Time: {available_time} minutes per day
+    - Activity: {activity_level}
+    - Time: {available_time} mins/day
 
-    Please provide:
-    1. 📋 Weekly Workout Plan (day by day)
-    2. 🥗 Daily Diet Plan (breakfast, lunch, dinner, snacks)
-    3. 💧 Daily Water Intake
-    4. 😴 Sleep Schedule
-    5. 💡 Top 5 Tips for achieving the goal
+    Give ONLY:
+    1. BMI Status & what it means
+    2. Timeline (how many weeks to reach target)
+    3. Weekly Workout Plan (bullet points)
+    4. Daily Diet Plan (simple)
+    5. Daily Water Intake
+    6. 3 Key Tips
 
-    Make it practical, realistic and motivating!
+    Keep it under 300 words!
     """
 
     response = client.chat.completions.create(
@@ -32,14 +64,16 @@ def generate_fitness_plan(age, weight, height, goal, activity_level, available_t
         messages=[
             {
                 "role": "system",
-                "content": """You are an expert fitness coach and nutritionist. Give practical, safe and personalized fitness advice.Give SHORT, CRISP and CLEAR fitness plans.
-            Use bullet points and emojis.
-            No long paragraphs.
-            Be direct and to the point.
-            At last what will be the output to tell.
-            acknowledge user to be in healthy body acording to BMI.
-            Plan exercise daily.
-            Maximum 300 words."""
+                "content": """You are an expert fitness coach and nutritionist. 
+                Give practical, safe and personalized fitness advice.
+                Give SHORT, CRISP and CLEAR fitness plans.
+                Use bullet points.
+                No long paragraphs.
+                Be direct and to the point.
+                Always mention BMI status and healthy range.
+                Acknowledge user to be in healthy body according to BMI.
+                Plan exercise daily.
+                Maximum 300 words."""
             },
             {
                 "role": "user",
@@ -50,7 +84,9 @@ def generate_fitness_plan(age, weight, height, goal, activity_level, available_t
         max_tokens=2000
     )
 
-    return response.choices[0].message.content
+    return response.choices[0].message.content, bmi, bmi_category
+
+
 def modify_fitness_plan(current_plan, user_feedback):
     
     response = client.chat.completions.create(
@@ -60,8 +96,11 @@ def modify_fitness_plan(current_plan, user_feedback):
                 "role": "system",
                 "content": """You are an expert fitness coach.
                 User has a fitness plan but wants modifications.
-                Give SHORT and CRISP modified plan.
-                Maximum 200 words. Use bullet points."""
+                Give SHORT, CRISP and CLEAR fitness plans.
+                Use bullet points.
+                No long paragraphs.
+                Be direct and to the point.
+                Maximum 200 words."""
             },
             {
                 "role": "user",
