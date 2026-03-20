@@ -1,7 +1,12 @@
 import streamlit as st
 from planner import generate_fitness_plan, modify_fitness_plan
-from tracker import log_progress, get_progress, save_plan, get_current_plan
-from auth import register_user, get_authenticator
+from supabase_db import (
+    register_user, login_user,
+    save_profile, get_profile,
+    save_plan, get_current_plan,
+    log_progress, get_progress
+)
+import pandas as pd
 
 st.set_page_config(
     page_title="FitForge",
@@ -12,11 +17,8 @@ st.set_page_config(
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-    
     * { font-family: 'Inter', sans-serif; }
     .main { background-color: #0a0a0f; }
-    
-    /* Animated Header */
     .header-card {
         background: linear-gradient(135deg, #ff4b4b, #ff8c00, #ff4b4b);
         background-size: 200% 200%;
@@ -33,19 +35,8 @@ st.markdown("""
         50% { background-position: 100% 50%; }
         100% { background-position: 0% 50%; }
     }
-    .header-card h1 {
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin: 0;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-    }
-    .header-card p {
-        font-size: 1.1rem;
-        margin: 10px 0 0;
-        opacity: 0.9;
-    }
-
-    /* Plan Card */
+    .header-card h1 { font-size: 2.5rem; font-weight: 700; margin: 0; }
+    .header-card p { font-size: 1.1rem; margin: 10px 0 0; opacity: 0.9; }
     .plan-card {
         background: linear-gradient(145deg, #1a1a2e, #16213e);
         padding: 30px;
@@ -55,24 +46,7 @@ st.markdown("""
         margin: 15px 0;
         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
     }
-    .plan-card h3 {
-        color: #ff4b4b;
-        font-size: 1.3rem;
-        margin-bottom: 15px;
-    }
-
-    /* Info Card */
-    .info-card {
-        background: linear-gradient(145deg, #1a1a2e, #16213e);
-        padding: 20px;
-        border-radius: 15px;
-        border-top: 3px solid #00c853;
-        color: #e0e0e0;
-        margin: 10px 0;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-    }
-
-    /* Buttons */
+    .plan-card h3 { color: #ff4b4b; font-size: 1.3rem; margin-bottom: 15px; }
     .stButton>button {
         background: linear-gradient(135deg, #ff4b4b, #ff8c00);
         color: white;
@@ -89,16 +63,6 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 6px 20px rgba(255, 75, 75, 0.4);
     }
-
-    /* Input fields */
-    .stNumberInput input, .stTextInput input, .stTextArea textarea {
-        background-color: #1a1a2e !important;
-        color: #e0e0e0 !important;
-        border: 1px solid #333 !important;
-        border-radius: 10px !important;
-    }
-
-    /* Metrics */
     [data-testid="stMetric"] {
         background: linear-gradient(145deg, #1a1a2e, #16213e);
         padding: 15px;
@@ -106,24 +70,11 @@ st.markdown("""
         border-bottom: 3px solid #ff4b4b;
         box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
-
-    /* Sidebar */
-    [data-testid="stSidebar"] {
-        background-color: #0d0d1a;
-    }
-
-    /* Divider */
-    hr { border-color: #333; }
-
-    /* Tab styling */
+    [data-testid="stSidebar"] { background-color: #0d0d1a; }
     .stTabs [data-baseweb="tab-list"] {
         background-color: #1a1a2e;
         border-radius: 10px;
         padding: 5px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        color: #e0e0e0;
-        border-radius: 8px;
     }
     .stTabs [aria-selected="true"] {
         background: linear-gradient(135deg, #ff4b4b, #ff8c00) !important;
@@ -132,17 +83,21 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# AUTH SYSTEM
-authenticator, config = get_authenticator()
+# ==================
+# SESSION STATE INIT
+# ==================
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "username" not in st.session_state:
+    st.session_state.username = None
+if "name" not in st.session_state:
+    st.session_state.name = None
 
-name = st.session_state.get("name")
-authentication_status = st.session_state.get("authentication_status")
-username = st.session_state.get("username")
-
+# ==================
 # NOT LOGGED IN
-if not authentication_status:
+# ==================
+if not st.session_state.logged_in:
 
-    # App title
     st.markdown("""
         <div class="header-card">
             <h1>FitForge</h1>
@@ -153,22 +108,56 @@ if not authentication_status:
     tab1, tab2 = st.tabs(["Login", "Register"])
 
     with tab1:
-        authenticator.login()
-        name = st.session_state.get("name")
-        authentication_status = st.session_state.get("authentication_status")
-        username = st.session_state.get("username")
+        st.subheader("Login")
+        login_username = st.text_input("Username", key="login_username")
+        login_password = st.text_input("Password", type="password", key="login_password")
 
-        if authentication_status == False:
-            st.error("Wrong username or password!")
-        elif authentication_status == None:
-            st.warning("Please enter your credentials!")
+        if st.button("Login"):
+            if not login_username or not login_password:
+                st.error("Please fill all fields!")
+            else:
+                with st.spinner("Logging in..."):
+                    success, message, user = login_user(
+                        login_username, login_password
+                    )
+
+                if success:
+                    st.session_state.logged_in = True
+                    st.session_state.username = login_username
+                    st.session_state.name = user["name"]
+
+                    # Default values set pannudu
+                    if "age" not in st.session_state:
+                        st.session_state.age = 25
+                    if "current_weight" not in st.session_state:
+                        st.session_state.current_weight = 70
+                    if "target_weight" not in st.session_state:
+                        st.session_state.target_weight = 65
+                    if "height" not in st.session_state:
+                        st.session_state.height = 170
+                    if "goal" not in st.session_state:
+                        st.session_state.goal = "Weight Loss"
+                    if "activity_level" not in st.session_state:
+                        st.session_state.activity_level = "Sedentary (No exercise)"
+                    if "available_time" not in st.session_state:
+                        st.session_state.available_time = 45
+
+                    # Plan load pannudu
+                    existing_plan = get_current_plan(login_username)
+                    if existing_plan:
+                        st.session_state.plan = existing_plan
+
+                    st.success("Login successful!")
+                    st.rerun()
+                else:
+                    st.error(message)
 
     with tab2:
         st.subheader("Create New Account")
-        new_username = st.text_input("Username")
-        new_name = st.text_input("Full Name")
-        new_password = st.text_input("Password", type="password")
-        confirm_password = st.text_input("Confirm Password", type="password")
+        new_username = st.text_input("Username", key="reg_username")
+        new_name = st.text_input("Full Name", key="reg_name")
+        new_password = st.text_input("Password", type="password", key="reg_password")
+        confirm_password = st.text_input("Confirm Password", type="password", key="reg_confirm")
 
         if st.button("Register"):
             if not new_username or not new_name or not new_password:
@@ -176,23 +165,35 @@ if not authentication_status:
             elif new_password != confirm_password:
                 st.error("Passwords do not match!")
             else:
-                success, message = register_user(
-                    new_username, new_name, new_password
-                )
+                with st.spinner("Creating account..."):
+                    success, message = register_user(
+                        new_username, new_name, new_password
+                    )
                 if success:
                     st.success(message + " Please login!")
                 else:
                     st.error(message)
 
-
+# ==================
 # LOGGED IN
-if authentication_status == True:
+# ==================
+if st.session_state.logged_in:
 
-    # Load existing plan
-    if "plan" not in st.session_state:
-        existing_plan = get_current_plan(username)
-        if existing_plan:
-            st.session_state.plan = existing_plan
+    username = st.session_state.username
+    name = st.session_state.name
+
+    # Profile load pannudu — every page load la
+    if "profile_loaded" not in st.session_state:
+        profile = get_profile(username)
+        if profile:
+            st.session_state.age = int(profile.get("age") or 25)
+            st.session_state.current_weight = int(profile.get("current_weight") or 70)
+            st.session_state.target_weight = int(profile.get("target_weight") or 65)
+            st.session_state.height = int(profile.get("height") or 170)
+            st.session_state.goal = profile.get("goal") or "Weight Loss"
+            st.session_state.activity_level = profile.get("activity_level") or "Sedentary (No exercise)"
+            st.session_state.available_time = int(profile.get("available_time") or 45)
+        st.session_state.profile_loaded = True
 
     # Sidebar
     st.sidebar.markdown(f"""
@@ -210,7 +211,10 @@ if authentication_status == True:
         </div>
     """, unsafe_allow_html=True)
 
-    authenticator.logout("Logout", "sidebar")
+    if st.sidebar.button("Logout"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
 
     st.sidebar.markdown("---")
     page = st.sidebar.selectbox(
@@ -220,7 +224,9 @@ if authentication_status == True:
     st.sidebar.markdown("---")
     st.sidebar.info("Tip: Generate your plan first then track daily progress!")
 
+    # ==================
     # PAGE 1 — Generate Plan
+    # ==================
     if page == "Generate Plan":
 
         st.markdown("""
@@ -235,53 +241,77 @@ if authentication_status == True:
 
             with col1:
                 st.subheader("Personal Details")
-                age = st.number_input("Age", min_value=10, max_value=80, value=25)
-                current_weight = st.number_input("Current Weight (kg)", min_value=30, max_value=200, value=70)
-                target_weight = st.number_input("Target Weight (kg)", min_value=30, max_value=200, value=65)
-                height = st.number_input("Height (cm)", min_value=100, max_value=250, value=170)
+                st.number_input("Age",
+                    min_value=10, max_value=80,
+                    key="age")
+                st.number_input("Current Weight (kg)",
+                    min_value=30, max_value=200,
+                    key="current_weight")
+                st.number_input("Target Weight (kg)",
+                    min_value=30, max_value=200,
+                    key="target_weight")
+                st.number_input("Height (cm)",
+                    min_value=100, max_value=250,
+                    key="height")
 
             with col2:
                 st.subheader("Fitness Goals")
-                goal = st.selectbox("Your Goal", [
-                    "Weight Loss",
-                    "Weight Gain",
-                    "Muscle Gain",
-                    "Stay Fit",
-                    "Increase Stamina",
-                    "Improve Flexibility",
-                    "Fix Posture",
-                    "Sports Fitness"
-                ])
-                activity_level = st.selectbox("Activity Level", [
+                goals_list = [
+                    "Weight Loss", "Weight Gain", "Muscle Gain",
+                    "Stay Fit", "Increase Stamina",
+                    "Improve Flexibility", "Fix Posture", "Sports Fitness"
+                ]
+                st.selectbox("Your Goal",
+                    goals_list,
+                    key="goal")
+
+                activity_list = [
                     "Sedentary (No exercise)",
                     "Lightly Active (1-2 days/week)",
                     "Moderately Active (3-4 days/week)",
                     "Very Active (5+ days/week)"
-                ])
-                available_time = st.slider(
+                ]
+                st.selectbox("Activity Level",
+                    activity_list,
+                    key="activity_level")
+
+                st.slider(
                     "Available Time (minutes/day)",
-                    min_value=15,
-                    max_value=120,
-                    value=45
-                )
+                    min_value=15, max_value=120,
+                    key="available_time")
 
             submitted = st.form_submit_button("Generate My Plan")
 
         if submitted:
             with st.spinner("AI generating your personalized plan..."):
                 plan, bmi, bmi_category = generate_fitness_plan(
-                    age, current_weight, target_weight,
-                    height, goal, activity_level, available_time
+                    st.session_state.age,
+                    st.session_state.current_weight,
+                    st.session_state.target_weight,
+                    st.session_state.height,
+                    st.session_state.goal,
+                    st.session_state.activity_level,
+                    st.session_state.available_time
                 )
                 st.session_state.plan = plan
                 st.session_state.bmi = bmi
                 st.session_state.bmi_category = bmi_category
+
+                save_profile(
+                    username,
+                    st.session_state.age,
+                    st.session_state.current_weight,
+                    st.session_state.target_weight,
+                    st.session_state.height,
+                    st.session_state.goal,
+                    st.session_state.activity_level,
+                    st.session_state.available_time
+                )
                 save_plan(username, plan)
             st.toast("Plan generated successfully!", icon="✅")
 
-        if "plan" in st.session_state:
+        if "plan" in st.session_state and st.session_state.plan:
 
-            # BMI Progress bar
             bmi_val = st.session_state.get("bmi", 0)
             bmi_cat = st.session_state.get("bmi_category", "N/A")
 
@@ -300,8 +330,6 @@ if authentication_status == True:
                 else:
                     st.metric("Status", "Take action!")
 
-            # BMI scale
-            st.markdown("**BMI Scale:**")
             if bmi_val:
                 bmi_progress = min(bmi_val / 40, 1.0)
                 st.progress(bmi_progress,
@@ -316,7 +344,6 @@ if authentication_status == True:
             """, unsafe_allow_html=True)
             st.markdown(st.session_state.plan)
 
-            # Modify plan
             st.markdown("---")
             st.subheader("Not comfortable with something?")
             feedback = st.text_input(
@@ -338,8 +365,9 @@ if authentication_status == True:
                 else:
                     st.warning("Please enter your feedback!")
 
-    
+    # ==================
     # PAGE 2 — Track Progress
+    # ==================
     elif page == "Track Progress":
 
         st.markdown("""
@@ -349,16 +377,15 @@ if authentication_status == True:
             </div>
         """, unsafe_allow_html=True)
 
-        # Current plan show
         current_plan = get_current_plan(username)
         if current_plan:
             with st.expander("View Your Current Plan"):
-                st.markdown(f"""
+                st.markdown("""
                     <div class="plan-card">
                         <h3>Your Current Plan</h3>
-                        {current_plan}
                     </div>
                 """, unsafe_allow_html=True)
+                st.markdown(current_plan)
         else:
             st.info("No plan generated yet! Go to Generate Plan first.")
 
@@ -368,12 +395,15 @@ if authentication_status == True:
             col1, col2 = st.columns(2)
 
             with col1:
-                weight = st.number_input("Today's Weight (kg)", min_value=30.0, max_value=200.0, value=70.0)
-                water_intake = st.number_input("Water Intake (Litres)", min_value=0.0, max_value=10.0, value=2.0)
+                weight = st.number_input("Today's Weight (kg)",
+                    min_value=30.0, max_value=200.0, value=70.0)
+                water_intake = st.number_input("Water Intake (Litres)",
+                    min_value=0.0, max_value=10.0, value=2.0)
 
             with col2:
                 workout_done = st.selectbox("Workout Done?", ["Yes", "No"])
-                sleep_hours = st.number_input("Sleep Hours", min_value=0.0, max_value=12.0, value=7.0)
+                sleep_hours = st.number_input("Sleep Hours",
+                    min_value=0.0, max_value=12.0, value=7.0)
 
             notes = st.text_area("Notes", placeholder="How was your day?...")
             submitted = st.form_submit_button("Log Progress")
@@ -387,7 +417,9 @@ if authentication_status == True:
             st.toast(message, icon="✅")
             st.balloons()
 
+    # ==================
     # PAGE 3 — View History
+    # ==================
     elif page == "View History":
 
         st.markdown("""
@@ -397,11 +429,13 @@ if authentication_status == True:
             </div>
         """, unsafe_allow_html=True)
 
-        df = get_progress(username)
+        data = get_progress(username)
 
-        if df.empty:
+        if not data:
             st.info("No progress logged yet! Start tracking.")
         else:
+            df = pd.DataFrame(data)
+
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Total Days", len(df))
