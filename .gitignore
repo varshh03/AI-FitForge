@@ -1,0 +1,4 @@
+.env
+progress.csv
+__pycache__/
+*.pyc
