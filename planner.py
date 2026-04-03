@@ -1,15 +1,15 @@
 import os
-from groq import Groq
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 def calculate_bmi(weight, height):
     height_m = height / 100
     bmi = weight / (height_m ** 2)
-    
+
     if bmi < 18.5:
         category = "Underweight"
     elif bmi < 25:
@@ -18,14 +18,51 @@ def calculate_bmi(weight, height):
         category = "Overweight"
     else:
         category = "Obese"
-    
+
     return round(bmi, 1), category
 
+
+def call_openrouter(messages):
+    url = "https://openrouter.ai/api/v1/chat/completions"
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    #  Working models (fallback list)
+    models = [
+        "mistralai/mistral-7b-instruct",
+        "meta-llama/llama-3-8b-instruct",
+        "google/gemma-7b-it"
+    ]
+
+    for model in models:
+        try:
+            data = {
+                "model": model,
+                "messages": messages
+            }
+
+            response = requests.post(url, headers=headers, json=data)
+            result = response.json()
+
+            print(f"Trying model: {model}")
+            print("API RESPONSE:", result)
+
+            if "choices" in result:
+                return result["choices"][0]["message"]["content"]
+
+        except Exception as e:
+            print(f"Error with {model}:", e)
+
+    return "⚠️ All AI models failed. Please try again later."
+
 def generate_fitness_plan(age, current_weight, target_weight, height, goal, activity_level, available_time):
-    
-    # Weight difference calculate pannudu
+
+    # Weight goal
     weight_diff = abs(current_weight - target_weight)
-    
+
     if current_weight > target_weight:
         weight_goal = f"Lose {weight_diff} kg"
     elif current_weight < target_weight:
@@ -33,91 +70,73 @@ def generate_fitness_plan(age, current_weight, target_weight, height, goal, acti
     else:
         weight_goal = "Maintain current weight"
 
-    # BMI calculate pannudu
+    # BMI
     bmi, bmi_category = calculate_bmi(current_weight, height)
 
     prompt = f"""
-    Create a SHORT fitness plan for:
-    - Age: {age}
-    - Current Weight: {current_weight} kg
-    - Target Weight: {target_weight} kg
-    - Weight Goal: {weight_goal}
-    - Height: {height} cm
-    - Current BMI: {bmi} ({bmi_category})
-    - Goal: {goal}
-    - Activity: {activity_level}
-    - Time: {available_time} mins/day
+    Create a SHORT fitness plan:
+
+    Age: {age}
+    Current Weight: {current_weight} kg
+    Target Weight: {target_weight} kg
+    Goal: {weight_goal}
+    Height: {height} cm
+    BMI: {bmi} ({bmi_category})
+    Fitness Goal: {goal}
+    Activity Level: {activity_level}
+    Time: {available_time} mins/day
 
     Give ONLY:
-    1. BMI Status & what it means
-    2. Timeline (how many weeks to reach target)
-    3. Weekly Workout Plan (bullet points)
-    4. Daily Diet Plan (simple)
-    5. Daily Water Intake
-    6. 3 Key Tips
+    1. BMI meaning
+    2. Timeline
+    3. Weekly workout use bullet points
+    4. Simple Indian diet
+    5. Water intake
+    6. 3 tips
 
-    Keep it under 300 words!
+    Under 300 words. Use bullet points.
     """
 
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {
-                "role": "system",
-                "content": """You are an expert fitness coach and nutritionist. 
-                Give practical, safe and personalized fitness advice.
-                Give SHORT, CRISP and CLEAR fitness plans.
-                Use bullet points.
-                No long paragraphs.
-                Be direct and to the point.
-                Always mention BMI status and healthy range.
-                Acknowledge user to be in healthy body according to BMI.
-                Plan exercise daily.
-                Maximum 300 words."""
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0.7,
-        max_tokens=2000
-    )
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a fitness coach. Give short, clear bullet points."
+        },
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ]
 
-    return response.choices[0].message.content, bmi, bmi_category
+    plan = call_openrouter(messages)
 
+    return plan, bmi, bmi_category
 
 def modify_fitness_plan(current_plan, user_feedback):
-    
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {
-                "role": "system",
-                "content": """You are an expert fitness coach.
-                User has a fitness plan but wants modifications.
-                Give SHORT, CRISP and CLEAR fitness plans.
-                Use bullet points.
-                No long paragraphs.
-                Be direct and to the point.
-                Maximum 200 words."""
-            },
-            {
-                "role": "user",
-                "content": f"""
-                Current Plan:
-                {current_plan}
-                
-                User Feedback:
-                {user_feedback}
-                
-                Modify the plan based on feedback.
-                Keep what works, change what user can't do.
-                """
-            }
-        ],
-        temperature=0.7,
-        max_tokens=500
-    )
-    
-    return response.choices[0].message.content
+
+    prompt = f"""
+    Modify this fitness plan:
+
+    PLAN:
+    {current_plan}
+
+    USER FEEDBACK:
+    {user_feedback}
+
+    Keep it short, clear, and practical.
+    Use bullet points.
+    Max 200 words.
+    """
+
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a fitness coach. Modify plans based on user needs."
+        },
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ]
+
+    return call_openrouter(messages)
