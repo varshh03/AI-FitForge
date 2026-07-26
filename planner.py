@@ -32,9 +32,7 @@ def call_openrouter(messages):
 
     #  Working models (fallback list)
     models = [
-        "mistralai/mistral-7b-instruct",
-        "meta-llama/llama-3-8b-instruct",
-        "google/gemma-7b-it"
+        "openrouter/free"
     ]
 
     for model in models:
